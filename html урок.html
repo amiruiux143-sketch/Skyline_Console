@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skyline Admin Console</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        :root { --accent: #007aff; --bg: #000; --card: #0c0c0e; --border: #1c1c1e; }
+        body { background: var(--bg); color: #fff; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .card { width: 100%; max-width: 450px; background: var(--card); border: 1px solid var(--border); border-radius: 25px; padding: 30px; text-align: center; }
+        input[type="text"] { width: 100%; background: #000; border: 1px solid var(--border); padding: 15px; border-radius: 12px; color: #fff; margin-bottom: 15px; outline: none; box-sizing: border-box; font-family: monospace; }
+        
+        .upload-row { display: flex; gap: 10px; margin-bottom: 15px; }
+        .upload-zone { flex: 1; border: 2px dashed var(--border); padding: 20px; border-radius: 20px; cursor: pointer; transition: 0.3s; position: relative; }
+        .upload-zone:hover { border-color: var(--accent); background: #007aff0a; }
+        .upload-zone i { font-size: 24px; color: var(--accent); display: block; margin-bottom: 5px; }
+        .file-label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #8e8e93; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        
+        .progress-bar { height: 6px; background: #1a1a1c; border-radius: 10px; margin: 15px 0; display: none; overflow: hidden; }
+        #fill { width: 0%; height: 100%; background: var(--accent); box-shadow: 0 0 10px var(--accent); transition: 0.1s; }
+        
+        .btn-send { width: 100%; background: var(--accent); color: #fff; border: none; padding: 18px; border-radius: 15px; font-weight: 800; cursor: pointer; font-size: 14px; transition: 0.3s; }
+        .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
+        #status { font-size: 11px; color: #8e8e93; margin-top: 15px; font-family: monospace; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2 style="margin-bottom: 5px; font-weight: 900;">SKYLINE <span style="color:var(--accent)">CONSOLE</span></h2>
+    <p style="font-size: 10px; color: #555; margin-bottom: 25px;">PUBLISHING SYSTEM V3.0</p>
+    
+    <input type="text" id="app_name" placeholder="Введите название проекта">
+    
+    <div class="upload-row">
+        <div class="upload-zone" onclick="document.getElementById('logo_input').click()">
+            <i class="fa fa-image"></i>
+            <div id="logo_name" class="file-label">ЛОГОТИП</div>
+            <input type="file" id="logo_input" accept="image/*" style="display:none" onchange="updateLabel(this, 'logo_name')">
+        </div>
+
+        <div class="upload-zone" onclick="document.getElementById('file_input').click()">
+            <i class="fa fa-file-code"></i>
+            <div id="file_name" class="file-label">ФАЙЛ APK</div>
+            <input type="file" id="file_input" style="display:none" onchange="updateLabel(this, 'file_name')">
+        </div>
+    </div>
+
+    <div class="progress-bar" id="p_bar">
+        <div id="fill"></div>
+    </div>
+
+    <button class="btn-send" id="btn" onclick="startPublishing()">ОПУБЛИКОВАТЬ В КАНАЛ</button>
+    <div id="status">WAITING_FOR_INPUT</div>
+</div>
+
+<script>
+function updateLabel(input, targetId) {
+    if(input.files[0]) {
+        document.getElementById(targetId).innerText = input.files[0].name;
+        document.getElementById(targetId).style.color = "#007aff";
+    }
+}
+
+async function uploadFile(file) {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('reqtype', 'fileupload');
+        formData.append('fileToUpload', file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', 'https://corsproxy.io/?https://catbox.moe/user/api.php', true);
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const pct = Math.round((e.loaded / e.total) * 100);
+                document.getElementById('fill').style.width = pct + '%';
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status === 200) resolve(xhr.responseText.trim());
+            else reject("Upload failed");
+        };
+        xhr.onerror = () => reject("Network error");
+        xhr.send(formData);
+    });
+}
+
+async function startPublishing() {
+    const file = document.getElementById('file_input').files[0];
+    const logo = document.getElementById('logo_input').files[0];
+    const name = document.getElementById('app_name').value;
+    const btn = document.getElementById('btn');
+    const status = document.getElementById('status');
+    const pBar = document.getElementById('p_bar');
+
+    if(!file || !logo || !name) return alert("Брат, нужно название, логотип и сам APK!");
+
+    btn.disabled = true;
+    pBar.style.display = 'block';
+
+    try {
+        // ШАГ 1: Загрузка Логотипа
+        status.innerText = "UPLOAD: ИКОНКА...";
+        const logoUrl = await uploadFile(logo);
+        
+        // ШАГ 2: Загрузка APK
+        document.getElementById('fill').style.width = '0%';
+        status.innerText = "UPLOAD: ФАЙЛ APK...";
+        const apkUrl = await uploadFile(file);
+
+        // ШАГ 3: Отправка в Телеграм
+        status.innerText = "SYNCING WITH SKYLINE CLOUD...";
+        await sendToTelegram(name, logoUrl, apkUrl);
+
+    } catch (e) {
+        alert("Ошибка: " + e);
+        btn.disabled = false;
+    }
+}
+
+async function sendToTelegram(appName, logoUrl, apkUrl) {
+    const token = '8358797080:AAGamsFDYRfMn7FDWf4GKZDzJNHZj6eeDQg';
+    const chatId = '7076467876';
+    
+    // Форматируем текст ТАК, ЧТОБЫ КОД ПРИЛОЖЕНИЯ ЕГО ПОНЯЛ
+    // Мы вставляем прямую ссылку на логотип в текст поста
+    const text = `🚀 *НОВЫЙ ПРОЕКТ В SKYLINE*\n\n📦 *Название:* ${appName}\n🖼 *Иконка:* ${logoUrl}\n🔗 *Ссылка:* [СКАЧАТЬ APK](${apkUrl})\n\n✅ Проверено. Без лимитов.`;
+    
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            chat_id: chatId,
+            text: text,
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[{ text: "📥 СКАЧАТЬ ПРИЛОЖЕНИЕ", url: apkUrl }]]
+            }
+        })
+    });
+
+    if(res.ok) {
+        document.getElementById('status').innerText = "DONE: SUCCESS_PUBLISHED";
+        alert("Опубликовано! Код Skyline теперь увидит и название, и логотип.");
+    }
+    document.getElementById('btn').disabled = false;
+    document.getElementById('p_bar').style.display = 'none';
+}
+</script>
+</body>
+</html>
